@@ -1,0 +1,67 @@
+FROM alpine:latest
+
+# Install tailscale and any other dependencies
+RUN apk add --no-cache \
+    iptables \
+    ca-certificates \
+    curl \
+    tini \
+    bash \
+    tailscale
+
+# Environment variables
+ENV TS_STATE_DIR=/tmp/tailscale-state
+ENV TS_SOCKET_DIR=/tmp/tailscale-socket
+ENV TS_SOCKET=$TS_SOCKET_DIR/tailscaled.sock
+
+# Create necessary directories
+RUN mkdir -p $TS_STATE_DIR $TS_SOCKET_DIR
+
+# Add embedded entrypoint script
+RUN cat <<'EOF' > /entrypoint.sh
+#!/bin/bash
+set -euo pipefail
+
+echo "[entrypoint] Starting tailscaled..."
+
+# Start tailscaled daemon in the background
+tailscaled \
+  --tun=userspace-networking \
+  --statedir="${TS_STATE_DIR}" \
+  --socket="${TS_SOCKET}" &
+
+# Wait for the socket to appear
+for i in {1..30}; do
+    if [ -S "${TS_SOCKET}" ]; then
+        echo "[entrypoint] tailscaled is ready!"
+        break
+    fi
+    echo "[entrypoint] Waiting for tailscaled to be ready..."
+    sleep 1
+done
+
+if [ ! -S "${TS_SOCKET}" ]; then
+    echo "[entrypoint] tailscaled socket not found after timeout"
+    exit 1
+fi
+
+# Check if TS_AUTHKEY is set
+if [ -z "${TS_AUTHKEY:-}" ]; then
+  echo "[entrypoint] ERROR: TS_AUTHKEY environment variable is not set"
+  exit 1
+fi
+
+# Bring up the Tailscale interface
+echo "[entrypoint] Running tailscale up..."
+TAILSCALE_SOCKET="${TS_SOCKET}" tailscale up --authkey="${TS_AUTHKEY}" --hostname="lambda-node"
+
+# Now start your app
+echo "[entrypoint] Starting your app..."
+# 🔥 Replace the line below with your real app
+exec sleep infinity
+EOF
+
+# Make the script executable
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]

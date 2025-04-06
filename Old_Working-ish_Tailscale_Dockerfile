@@ -1,0 +1,25 @@
+FROM python:3.10
+
+# Install necessary packages
+RUN apt-get update && \
+    apt-get install -y jq zip iptables && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install AWS CLI
+RUN pip install awscli
+
+# Install Tailscale
+RUN curl -fsSL https://tailscale.com/install.sh | sh
+
+# Create necessary directories
+RUN mkdir -p /var/lib/tailscale /usr/src/app
+
+# Set working directory
+WORKDIR /usr/src/app
+
+# Copy application files
+COPY . /usr/src/app
+
+# Start Tailscale and the application
+CMD tailscaled --tun=userspace-networking & tailscale up --authkey=${TAILSCALE_AUTH_KEY} --hostname=haaska-lambda && make
